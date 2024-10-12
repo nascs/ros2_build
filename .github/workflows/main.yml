@@ -1,0 +1,60 @@
+name: Build and Package ROS
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout source code
+      uses: actions/checkout@v2
+
+    - name: Set up ROS environment
+      run: |
+        sudo apt update
+        sudo apt install -y lsb-release curl
+        sudo sh -c 'echo "deb http://packages.ros.org/ros/ubuntu $(lsb_release -sc) main" > /etc/apt/sources.list.d/ros-latest.list'
+        curl -s https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | sudo apt-key add -
+        sudo apt update
+
+    - name: Install dependencies
+      run: |
+        sudo apt install -y build-essential cmake python3-rosdep python3-vcstool python3-rosinstall-generator python3-bloom
+        sudo rosdep init
+        rosdep update
+
+    - name: Create workspace and download sources
+      run: |
+        mkdir -p ~/ros_ws/src
+        cd ~/ros_ws
+        rosinstall_generator ros_base --rosdistro noetic --deps --tar > noetic-ros_base.rosinstall
+        vcs import src < noetic-ros_base.rosinstall
+
+    - name: Install ROS dependencies
+      run: |
+        cd ~/ros_ws
+        rosdep install --from-paths src --ignore-src -r -y
+
+    - name: Build ROS workspace
+      run: |
+        cd ~/ros_ws
+        catkin_make
+
+    - name: Generate Debian package
+      run: |
+        cd ~/ros_ws
+        bloom-generate rosdebian --ros-distro noetic
+        fakeroot debian/rules binary
+
+    - name: Upload Debian package
+      uses: actions/upload-artifact@v2
+      with:
+        name: ros-debian-package
+        path: ~/ros_ws/*.deb
